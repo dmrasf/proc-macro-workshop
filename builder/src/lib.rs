@@ -21,6 +21,8 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let mut builder_struct_content = proc_macro2::TokenStream::new();
     let mut builder_fn_content = proc_macro2::TokenStream::new();
     let mut builder_setters = proc_macro2::TokenStream::new();
+    let mut check_field_is_none = proc_macro2::TokenStream::new();
+    let mut builder_to_struct_content = proc_macro2::TokenStream::new();
     for f in fields.iter() {
         let ident = &f.ident;
         let ty = &f.ty;
@@ -35,6 +37,15 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             self.#ident = Some(#ident);
             self
         }
+        ));
+        check_field_is_none.extend(quote!(
+        if self.#ident.is_none() {
+            let err = format!("{} is None", stringify!(#ident));
+            return Err(err.into());
+        }
+        ));
+        builder_to_struct_content.extend(quote::quote!(
+        #ident: self.#ident.clone().unwrap(),
         ));
     }
 
@@ -51,6 +62,14 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     impl #builder_struct_ident {
         #builder_setters
+        pub fn build(
+            &mut self
+        ) -> std::result::Result<#struct_ident, std::boxed::Box<dyn std::error::Error>> {
+            #check_field_is_none
+            Ok(#struct_ident {
+                #builder_to_struct_content
+            })
+        }
     }
     );
     Ok(ret)
