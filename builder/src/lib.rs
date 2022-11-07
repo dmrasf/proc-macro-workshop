@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2;
-use syn::{parse_macro_input, DeriveInput};
+use quote::quote;
+use syn::{parse_macro_input, spanned::Spanned, DeriveInput};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -12,6 +13,48 @@ pub fn derive(input: TokenStream) -> TokenStream {
 }
 
 fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    let ret = proc_macro2::TokenStream::new();
+    let struct_ident = &st.ident;
+    let fields = get_struct_fields(st)?;
+    let builder_struct_ident =
+        syn::Ident::new(&format!("{}Builder", struct_ident.to_string()), st.span());
+
+    let mut builder_struct_content = proc_macro2::TokenStream::new();
+    let mut builder_fn_content = proc_macro2::TokenStream::new();
+    for f in fields.iter() {
+        let ident = &f.ident;
+        let ty = &f.ty;
+        builder_struct_content.extend(quote!(
+        #ident: std::option::Option<#ty>,
+        ));
+        builder_fn_content.extend(quote!(
+        #ident: std::option::Option::None,
+        ));
+    }
+
+    let ret = quote!(
+    pub struct #builder_struct_ident {
+        #builder_struct_content
+    }
+    impl #struct_ident {
+        pub fn builder() -> #builder_struct_ident {
+            #builder_struct_ident {
+                #builder_fn_content
+            }
+        }
+    }
+    );
     Ok(ret)
+}
+
+fn get_struct_fields(
+    st: &DeriveInput,
+) -> syn::Result<&syn::punctuated::Punctuated<syn::Field, syn::Token![,]>> {
+    if let syn::Data::Struct(syn::DataStruct {
+        fields: syn::Fields::Named(syn::FieldsNamed { ref named, .. }),
+        ..
+    }) = st.data
+    {
+        return Ok(named);
+    }
+    Err(syn::Error::new_spanned(st, "miss field"))
 }
