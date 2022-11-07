@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, parse_quote, DeriveInput};
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -28,9 +28,16 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             )),
         }
     }
+    let mut generics_param = st.generics.clone();
+    for g in generics_param.params.iter_mut() {
+        if let syn::GenericParam::Type(t) = g {
+            t.bounds.push(parse_quote!(std::fmt::Debug));
+        }
+    }
+    let (impl_generics, ty_generics, where_clause) = generics_param.split_for_impl();
 
     let ret = quote!(
-        impl std::fmt::Debug for #struct_ident {
+        impl #impl_generics std::fmt::Debug for #struct_ident #ty_generics #where_clause {
             fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
                 fmt.debug_struct(stringify!(#struct_ident))
                     #fmt_debug_body
