@@ -3,7 +3,7 @@ use proc_macro2;
 use quote::quote;
 use syn::{parse_macro_input, spanned::Spanned, DeriveInput};
 
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let st = parse_macro_input!(input as DeriveInput);
     match expand(&st) {
@@ -26,44 +26,72 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     for f in fields.iter() {
         let ident = &f.ident;
         let ty = &f.ty;
+        let inner_ty = match get_field_inner_type(ty, "Option".to_string()) {
+            Some(inner_ty) => inner_ty,
+            None => ty,
+        };
+        let inner_vec_ty = match get_field_inner_type(inner_ty, "Vec".to_string()) {
+            Some(inner_vec_ty) => inner_vec_ty,
+            None => inner_ty,
+        };
+        let attr = get_attr_builder_name(f)?;
+
         builder_fn_content.extend(quote!(
         #ident: std::option::Option::None,
         ));
-        match get_field_inner_type(ty, "Option".to_string()) {
-            Some(inner_ty) => {
-                builder_struct_content.extend(quote!(
-                #ident: std::option::Option<#inner_ty>,
-                ));
+        builder_struct_content.extend(quote!(
+        #ident: std::option::Option<#inner_ty>,
+        ));
+        if inner_ty == inner_vec_ty || attr.is_none() {
+            builder_setters.extend(quote!(
+            fn #ident(&mut self, #ident: #inner_ty) -> &mut Self {
+                self.#ident = Some(#ident);
+                self
+            }
+            ));
+        } else {
+            let attr_ident = &attr.unwrap();
+            if ident.as_ref() != Some(attr_ident) {
                 builder_setters.extend(quote!(
                 fn #ident(&mut self, #ident: #inner_ty) -> &mut Self {
                     self.#ident = Some(#ident);
                     self
                 }
                 ));
-                builder_to_struct_content.extend(quote::quote!(
-                #ident: self.#ident.clone(),
-                ));
             }
-            None => {
-                builder_struct_content.extend(quote!(
-                #ident: std::option::Option<#ty>,
-                ));
-                builder_setters.extend(quote!(
-                fn #ident(&mut self, #ident: #ty) -> &mut Self {
-                    self.#ident = Some(#ident);
-                    self
+            builder_setters.extend(quote!(
+            fn #attr_ident(&mut self, #attr_ident: #inner_vec_ty) -> &mut Self {
+                if let Some(ref mut v) = self.#ident {
+                    v.push(#attr_ident);
+                } else {
+                    self.#ident = std::option::Option::Some(vec![#attr_ident]);
+                }
+                self
+            }
+            ));
+        }
+        if ty == inner_ty {
+            builder_to_struct_content.extend(quote::quote!(
+            #ident: self.#ident.clone().unwrap(),
+            ));
+            if inner_ty != inner_vec_ty {
+                check_field_is_none.extend(quote!(
+                if self.#ident.is_none() {
+                    self.#ident = std::option::Option::Some(vec![]);
                 }
                 ));
+            } else {
                 check_field_is_none.extend(quote!(
                 if self.#ident.is_none() {
                     let err = format!("{} is None", stringify!(#ident));
                     return Err(err.into());
                 }
                 ));
-                builder_to_struct_content.extend(quote::quote!(
-                #ident: self.#ident.clone().unwrap(),
-                ));
             }
+        } else {
+            builder_to_struct_content.extend(quote::quote!(
+            #ident: self.#ident.clone(),
+            ));
         }
     }
 
@@ -127,4 +155,38 @@ fn get_field_inner_type(ty: &syn::Type, s: String) -> Option<&syn::Type> {
         }
     }
     None
+}
+
+fn get_attr_builder_name(field: &syn::Field) -> syn::Result<Option<syn::Ident>> {
+    for attr in &field.attrs {
+        if let Ok(syn::Meta::List(syn::MetaList {
+            ref path,
+            ref nested,
+            ..
+        })) = attr.parse_meta()
+        {
+            if let Some(p) = path.segments.first() {
+                if p.ident == "builder" {
+                    if let Some(syn::NestedMeta::Meta(syn::Meta::NameValue(kv))) = nested.first() {
+                        if kv.path.is_ident("each") {
+                            if let syn::Lit::Str(ref ident_str) = kv.lit {
+                                return Ok(Some(syn::Ident::new(
+                                    ident_str.value().as_str(),
+                                    attr.span(),
+                                )));
+                            }
+                        } else {
+                            if let Ok(syn::Meta::List(ref list)) = attr.parse_meta() {
+                                return Err(syn::Error::new_spanned(
+                                    list,
+                                    r#"expected `builder(each = "...")`"#,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
 }
