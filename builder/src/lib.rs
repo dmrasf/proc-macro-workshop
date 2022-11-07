@@ -26,27 +26,45 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     for f in fields.iter() {
         let ident = &f.ident;
         let ty = &f.ty;
-        builder_struct_content.extend(quote!(
-        #ident: std::option::Option<#ty>,
-        ));
         builder_fn_content.extend(quote!(
         #ident: std::option::Option::None,
         ));
-        builder_setters.extend(quote!(
-        fn #ident(&mut self, #ident: #ty) -> &mut Self {
-            self.#ident = Some(#ident);
-            self
+        match get_field_inner_type(ty, "Option".to_string()) {
+            Some(inner_ty) => {
+                builder_struct_content.extend(quote!(
+                #ident: std::option::Option<#inner_ty>,
+                ));
+                builder_setters.extend(quote!(
+                fn #ident(&mut self, #ident: #inner_ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
+                }
+                ));
+                builder_to_struct_content.extend(quote::quote!(
+                #ident: self.#ident.clone(),
+                ));
+            }
+            None => {
+                builder_struct_content.extend(quote!(
+                #ident: std::option::Option<#ty>,
+                ));
+                builder_setters.extend(quote!(
+                fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
+                }
+                ));
+                check_field_is_none.extend(quote!(
+                if self.#ident.is_none() {
+                    let err = format!("{} is None", stringify!(#ident));
+                    return Err(err.into());
+                }
+                ));
+                builder_to_struct_content.extend(quote::quote!(
+                #ident: self.#ident.clone().unwrap(),
+                ));
+            }
         }
-        ));
-        check_field_is_none.extend(quote!(
-        if self.#ident.is_none() {
-            let err = format!("{} is None", stringify!(#ident));
-            return Err(err.into());
-        }
-        ));
-        builder_to_struct_content.extend(quote::quote!(
-        #ident: self.#ident.clone().unwrap(),
-        ));
     }
 
     let ret = quote!(
@@ -86,4 +104,27 @@ fn get_struct_fields(
         return Ok(named);
     }
     Err(syn::Error::new_spanned(st, "miss field"))
+}
+
+fn get_field_inner_type(ty: &syn::Type, s: String) -> Option<&syn::Type> {
+    if let syn::Type::Path(syn::TypePath {
+        path: syn::Path { ref segments, .. },
+        ..
+    }) = ty
+    {
+        if let Some(seg) = segments.last() {
+            if seg.ident == s {
+                if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                    ref args,
+                    ..
+                }) = seg.arguments
+                {
+                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.first() {
+                        return Some(inner_ty);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
