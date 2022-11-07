@@ -20,6 +20,7 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let mut builder_struct_content = proc_macro2::TokenStream::new();
     let mut builder_fn_content = proc_macro2::TokenStream::new();
+    let mut builder_setters = proc_macro2::TokenStream::new();
     for f in fields.iter() {
         let ident = &f.ident;
         let ty = &f.ty;
@@ -28,6 +29,12 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         ));
         builder_fn_content.extend(quote!(
         #ident: std::option::Option::None,
+        ));
+        builder_setters.extend(quote!(
+        fn #ident(&mut self, #ident: #ty) -> &mut Self {
+            self.#ident = Some(#ident);
+            self
+        }
         ));
     }
 
@@ -41,6 +48,9 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 #builder_fn_content
             }
         }
+    }
+    impl #builder_struct_ident {
+        #builder_setters
     }
     );
     Ok(ret)
