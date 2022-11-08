@@ -44,32 +44,45 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
 
     let mut generics_param = st.generics.clone();
-    let associated_types_map = get_associated_types(st);
-    for g in generics_param.params.iter_mut() {
-        if let syn::GenericParam::Type(syn::TypeParam { ref ident, .. }) = g {
-            let ident_string = ident.to_string();
-            if phan_inner_types.contains(&ident_string) && !field_types.contains(&ident_string) {
-                continue;
-            }
-            if associated_types_map.contains_key(&ident_string)
-                && !field_types.contains(&ident_string)
-            {
-                continue;
-            }
-            if let syn::GenericParam::Type(t) = g {
-                t.bounds.push(parse_quote!(std::fmt::Debug));
+
+    if let Some(hatch) = get_struct_escape_hatch(st) {
+        eprintln!("{:#?}", hatch);
+        generics_param.make_where_clause();
+        generics_param
+            .where_clause
+            .as_mut()
+            .unwrap()
+            .predicates
+            .push(syn::parse_str(hatch.as_str()).unwrap());
+    } else {
+        let associated_types_map = get_associated_types(st);
+        for g in generics_param.params.iter_mut() {
+            if let syn::GenericParam::Type(syn::TypeParam { ref ident, .. }) = g {
+                let ident_string = ident.to_string();
+                if phan_inner_types.contains(&ident_string) && !field_types.contains(&ident_string)
+                {
+                    continue;
+                }
+                if associated_types_map.contains_key(&ident_string)
+                    && !field_types.contains(&ident_string)
+                {
+                    continue;
+                }
+                if let syn::GenericParam::Type(t) = g {
+                    t.bounds.push(parse_quote!(std::fmt::Debug));
+                }
             }
         }
-    }
-    generics_param.make_where_clause();
-    for (_, associated_types) in associated_types_map {
-        for associated_type in associated_types {
-            generics_param
-                .where_clause
-                .as_mut()
-                .unwrap()
-                .predicates
-                .push(parse_quote!(#associated_type:std::fmt::Debug));
+        generics_param.make_where_clause();
+        for (_, associated_types) in associated_types_map {
+            for associated_type in associated_types {
+                generics_param
+                    .where_clause
+                    .as_mut()
+                    .unwrap()
+                    .predicates
+                    .push(parse_quote!(#associated_type:std::fmt::Debug));
+            }
         }
     }
     let (impl_generics, ty_generics, where_clause) = generics_param.split_for_impl();
@@ -200,4 +213,19 @@ fn get_associated_types(st: &syn::DeriveInput) -> HashMap<String, Vec<syn::TypeP
     };
     visitor.visit_derive_input(st);
     visitor.associated_types
+}
+
+fn get_struct_escape_hatch(st: &syn::DeriveInput) -> Option<String> {
+    if let Some(inert_attr) = st.attrs.last() {
+        if let Ok(syn::Meta::List(syn::MetaList { nested, .. })) = inert_attr.parse_meta() {
+            if let Some(syn::NestedMeta::Meta(syn::Meta::NameValue(path_value))) = nested.last() {
+                if path_value.path.is_ident("bound") {
+                    if let syn::Lit::Str(ref lit) = path_value.lit {
+                        return Some(lit.value());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
