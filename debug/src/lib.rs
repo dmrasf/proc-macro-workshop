@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use proc_macro::TokenStream;
 use proc_macro2;
 use quote::quote;
+use syn::visit::{self, Visit};
 use syn::{parse_macro_input, parse_quote, DeriveInput};
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
@@ -41,15 +44,32 @@ fn expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
 
     let mut generics_param = st.generics.clone();
+    let associated_types_map = get_associated_types(st);
     for g in generics_param.params.iter_mut() {
         if let syn::GenericParam::Type(syn::TypeParam { ref ident, .. }) = g {
             let ident_string = ident.to_string();
             if phan_inner_types.contains(&ident_string) && !field_types.contains(&ident_string) {
                 continue;
             }
+            if associated_types_map.contains_key(&ident_string)
+                && !field_types.contains(&ident_string)
+            {
+                continue;
+            }
             if let syn::GenericParam::Type(t) = g {
                 t.bounds.push(parse_quote!(std::fmt::Debug));
             }
+        }
+    }
+    generics_param.make_where_clause();
+    for (_, associated_types) in associated_types_map {
+        for associated_type in associated_types {
+            generics_param
+                .where_clause
+                .as_mut()
+                .unwrap()
+                .predicates
+                .push(parse_quote!(#associated_type:std::fmt::Debug));
         }
     }
     let (impl_generics, ty_generics, where_clause) = generics_param.split_for_impl();
@@ -140,4 +160,44 @@ fn get_field_type_name(field: &syn::Field) -> syn::Result<Option<String>> {
         }
     }
     Ok(None)
+}
+
+fn get_associated_types(st: &syn::DeriveInput) -> HashMap<String, Vec<syn::TypePath>> {
+    struct TypePathVisitor {
+        generic_param_names: Vec<String>,
+        associated_types: HashMap<String, Vec<syn::TypePath>>,
+    }
+    impl<'ast> Visit<'ast> for TypePathVisitor {
+        fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+            if node.path.segments.len() >= 2 {
+                let type_name = node.path.segments[0].ident.to_string();
+                if self.generic_param_names.contains(&type_name) {
+                    self.associated_types
+                        .entry(type_name)
+                        .or_insert(Vec::new())
+                        .push(node.clone());
+                }
+            }
+            visit::visit_type_path(self, node);
+        }
+    }
+
+    let origin_generic_param_names: Vec<String> = st
+        .generics
+        .params
+        .iter()
+        .filter_map(|f| {
+            if let syn::GenericParam::Type(ty) = f {
+                return Some(ty.ident.to_string());
+            }
+            return None;
+        })
+        .collect();
+
+    let mut visitor = TypePathVisitor {
+        generic_param_names: origin_generic_param_names,
+        associated_types: HashMap::new(),
+    };
+    visitor.visit_derive_input(st);
+    visitor.associated_types
 }
