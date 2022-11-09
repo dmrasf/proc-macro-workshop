@@ -46,8 +46,12 @@ pub fn seq(input: TokenStream) -> TokenStream {
 
 impl SeqParse {
     fn build(&self, bd: &proc_macro2::TokenStream, i: isize) -> proc_macro2::TokenStream {
+        let buf = bd.clone().into_iter().collect::<Vec<_>>();
         let mut ret = proc_macro2::TokenStream::new();
-        for ref item in bd.clone().into_iter() {
+
+        let mut idx = 0usize;
+        while idx < buf.len() {
+            let item = &buf[idx];
             match item {
                 TokenTree::Group(group) => {
                     let new_stream = self.build(&group.stream(), i);
@@ -56,6 +60,25 @@ impl SeqParse {
                     ret.extend(quote!(#g));
                 }
                 TokenTree::Ident(ident) => {
+                    if idx + 2 < buf.len() {
+                        if let TokenTree::Punct(p) = &buf[idx + 1] {
+                            if p.as_char() == '~' {
+                                if let TokenTree::Ident(_ident) = &buf[idx + 2] {
+                                    if _ident == &self.ident {
+                                        let new_ident_litral =
+                                            format!("{}{}", ident.to_string(), i);
+                                        let new_ident = proc_macro2::Ident::new(
+                                            new_ident_litral.as_str(),
+                                            ident.span(),
+                                        );
+                                        ret.extend(quote::quote!(#new_ident));
+                                        idx += 3;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if ident == &self.ident {
                         let new_ident = proc_macro2::Literal::i64_unsuffixed(i as i64);
                         ret.extend(quote!(#new_ident));
@@ -65,6 +88,7 @@ impl SeqParse {
                 }
                 _ => ret.extend(quote!(#item)),
             }
+            idx += 1;
         }
         ret
     }
