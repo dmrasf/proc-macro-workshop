@@ -20,16 +20,29 @@ impl Parse for SeqParse {
         input.parse::<Token![in]>()?;
         let start: LitInt = input.parse()?;
         input.parse::<Token![..]>()?;
+
+        let mut inc = false;
+        if input.peek(Token!(=)) {
+            input.parse::<Token![=]>()?;
+            inc = true;
+        }
+
         let end: LitInt = input.parse()?;
         let body_buf;
         syn::braced!(body_buf in input);
         let body: proc_macro2::TokenStream = body_buf.parse()?;
-        Ok(SeqParse {
+
+        let mut ret = SeqParse {
             ident,
             start: start.base10_parse()?,
             end: end.base10_parse()?,
             body,
-        })
+        };
+        if inc {
+            ret.end += 1;
+        }
+
+        Ok(ret)
     }
 }
 
