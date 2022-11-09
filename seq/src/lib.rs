@@ -37,6 +37,12 @@ impl Parse for SeqParse {
 pub fn seq(input: TokenStream) -> TokenStream {
     let st = parse_macro_input!(input as SeqParse);
 
+    let cursor = syn::buffer::TokenBuffer::new2(st.body.clone());
+    let (expand, f) = st.expand_repeat(cursor.begin());
+    if f {
+        return expand.into();
+    }
+
     let mut ret = proc_macro2::TokenStream::new();
     for i in st.start..st.end {
         ret.extend(st.build(&st.body, i));
@@ -91,5 +97,78 @@ impl SeqParse {
             idx += 1;
         }
         ret
+    }
+
+    fn expand_repeat(
+        &self,
+        origin_cursor: syn::buffer::Cursor,
+    ) -> (proc_macro2::TokenStream, bool) {
+        let mut ret = proc_macro2::TokenStream::new();
+        let mut found = false;
+
+        let mut cursor = origin_cursor;
+        while !cursor.eof() {
+            if let Some((punct, next_c)) = cursor.punct() {
+                if punct.as_char() == '#' {
+                    if let Some((group_cursor, _, group_next_cursor)) =
+                        next_c.group(proc_macro2::Delimiter::Parenthesis)
+                    {
+                        if let Some((suffix, suffix_next_cursor)) = group_next_cursor.punct() {
+                            if suffix.as_char() == '*' {
+                                for i in self.start..self.end {
+                                    let t = self.build(&group_cursor.token_stream(), i);
+                                    ret.extend(t);
+                                }
+                                cursor = suffix_next_cursor;
+                                found = true;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some((group_cur, _, next_cur)) = cursor.group(proc_macro2::Delimiter::Brace) {
+                let (t, f) = self.expand_repeat(group_cur);
+                found = f;
+                ret.extend(quote::quote!({#t}));
+                cursor = next_cur;
+                continue;
+            } else if let Some((group_cur, _, next_cur)) =
+                cursor.group(proc_macro2::Delimiter::Bracket)
+            {
+                let (t, f) = self.expand_repeat(group_cur);
+                found = f;
+                ret.extend(quote::quote!([#t]));
+                cursor = next_cur;
+                continue;
+            } else if let Some((group_cur, _, next_cur)) =
+                cursor.group(proc_macro2::Delimiter::Parenthesis)
+            {
+                let (t, f) = self.expand_repeat(group_cur);
+                found = f;
+                ret.extend(quote::quote!((#t)));
+                cursor = next_cur;
+                continue;
+            } else if let Some((punct, next_cur)) = cursor.punct() {
+                ret.extend(quote::quote!(#punct));
+                cursor = next_cur;
+                continue;
+            } else if let Some((ident, next_cur)) = cursor.ident() {
+                ret.extend(quote::quote!(#ident));
+                cursor = next_cur;
+                continue;
+            } else if let Some((literal, next_cur)) = cursor.literal() {
+                ret.extend(quote::quote!(#literal));
+                cursor = next_cur;
+                continue;
+            } else if let Some((lifetime, next_cur)) = cursor.lifetime() {
+                ret.extend(quote::quote!(#lifetime));
+                cursor = next_cur;
+                continue;
+            }
+        }
+
+        (ret, found)
     }
 }
