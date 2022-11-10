@@ -13,5 +13,13 @@ pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
 
 fn expand(st: &Item) -> syn::Result<proc_macro2::TokenStream> {
     let ret = proc_macro2::TokenStream::new();
-    Ok(ret)
+
+    if let Item::Enum(eu) = st {
+        return Ok(ret);
+    } else {
+        syn::Result::Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "expected enum or match expression",
+        ))
+    }
 }
