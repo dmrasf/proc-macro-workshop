@@ -86,28 +86,37 @@ impl VisitMut for MatchVisitor {
         if remove_idx != -1 {
             i.attrs.remove(remove_idx as usize);
 
-            let mut ori_strings = Vec::new();
+            let mut oris: Vec<(String, &dyn ToTokens)> = Vec::new();
             for arm in &i.arms {
-                match arm.pat {
-                    syn::Pat::TupleStruct(syn::PatTupleStruct { ref path, .. }) => {
+                match &arm.pat {
+                    syn::Pat::TupleStruct(syn::PatTupleStruct { path, .. }) => {
                         let mut s = Vec::new();
                         for seg in &path.segments {
                             s.push(seg.ident.to_string());
                         }
-                        ori_strings.push((s.join("::").to_string(), path));
+                        oris.push((s.join("::").to_string(), path));
+                    }
+                    syn::Pat::Ident(p) => {
+                        oris.push((p.ident.to_string(), &p.ident));
+                    }
+                    syn::Pat::Wild(p) => {
+                        oris.push(("_".to_string(), &p.underscore_token));
                     }
                     _ => {
-                        self.err = Some(syn::Error::new_spanned(&arm.pat, "unsupported by #[sorted]"));
+                        self.err = Some(syn::Error::new_spanned(
+                            &arm.pat,
+                            "unsupported by #[sorted]",
+                        ));
                         return;
                     }
                 }
             }
 
-            let mut sorted_strings = ori_strings.clone();
-            sorted_strings.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut sorteds = oris.clone();
+            sorteds.sort_by(|a, b| a.0.cmp(&b.0));
 
-            for (ori, sorted) in ori_strings.iter().zip(sorted_strings.iter()) {
-                if ori != sorted {
+            for (ori, sorted) in oris.iter().zip(sorteds.iter()) {
+                if ori.0 != sorted.0 {
                     self.err = Some(syn::Error::new_spanned(
                         sorted.1.to_token_stream(),
                         format!("{} should sort before {}", sorted.0, ori.0),
