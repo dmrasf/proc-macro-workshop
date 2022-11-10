@@ -86,26 +86,28 @@ impl VisitMut for MatchVisitor {
         if remove_idx != -1 {
             i.attrs.remove(remove_idx as usize);
 
-            let mut ori_idents = Vec::new();
+            let mut ori_strings = Vec::new();
             for arm in &i.arms {
                 if let syn::Pat::TupleStruct(syn::PatTupleStruct { ref path, .. }) = arm.pat {
-                    if let Some(ps) = path.segments.first() {
-                        ori_idents.push(&ps.ident);
+                    let mut s = Vec::new();
+                    for seg in &path.segments {
+                        s.push(seg.ident.to_string());
                     }
+                    ori_strings.push((s.join("::").to_string(), path));
                 }
             }
 
-            let mut sorted_idents = ori_idents.clone();
-            sorted_idents.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+            let mut sorted_strings = ori_strings.clone();
+            sorted_strings.sort_by(|a, b| a.0.cmp(&b.0));
 
-            for (ori, sorted) in ori_idents.iter().zip(sorted_idents.iter()) {
+            for (ori, sorted) in ori_strings.iter().zip(sorted_strings.iter()) {
                 if ori != sorted {
                     self.err = Some(syn::Error::new_spanned(
-                        sorted.to_token_stream(),
+                        sorted.1.to_token_stream(),
                         format!(
                             "{} should sort before {}",
-                            sorted.to_string(),
-                            ori.to_string()
+                            sorted.0,
+                            ori.0
                         ),
                     ));
                     return;
