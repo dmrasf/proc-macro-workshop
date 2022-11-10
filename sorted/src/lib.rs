@@ -88,12 +88,18 @@ impl VisitMut for MatchVisitor {
 
             let mut ori_strings = Vec::new();
             for arm in &i.arms {
-                if let syn::Pat::TupleStruct(syn::PatTupleStruct { ref path, .. }) = arm.pat {
-                    let mut s = Vec::new();
-                    for seg in &path.segments {
-                        s.push(seg.ident.to_string());
+                match arm.pat {
+                    syn::Pat::TupleStruct(syn::PatTupleStruct { ref path, .. }) => {
+                        let mut s = Vec::new();
+                        for seg in &path.segments {
+                            s.push(seg.ident.to_string());
+                        }
+                        ori_strings.push((s.join("::").to_string(), path));
                     }
-                    ori_strings.push((s.join("::").to_string(), path));
+                    _ => {
+                        self.err = Some(syn::Error::new_spanned(&arm.pat, "unsupported by #[sorted]"));
+                        return;
+                    }
                 }
             }
 
@@ -104,11 +110,7 @@ impl VisitMut for MatchVisitor {
                 if ori != sorted {
                     self.err = Some(syn::Error::new_spanned(
                         sorted.1.to_token_stream(),
-                        format!(
-                            "{} should sort before {}",
-                            sorted.0,
-                            ori.0
-                        ),
+                        format!("{} should sort before {}", sorted.0, ori.0),
                     ));
                     return;
                 }
