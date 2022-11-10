@@ -4,12 +4,16 @@ use quote::ToTokens;
 use syn::{parse_macro_input, Item, ItemEnum};
 
 #[proc_macro_attribute]
-pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn sorted(_args: TokenStream, input: TokenStream) -> TokenStream {
     let st = parse_macro_input!(input as Item);
 
     match expand(&st) {
         Ok(ts) => ts.into(),
-        Err(e) => e.to_compile_error().into(),
+        Err(e) => {
+            let mut ts = e.to_compile_error();
+            ts.extend(st.to_token_stream());
+            ts.into()
+        }
     }
 }
 
